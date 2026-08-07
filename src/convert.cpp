@@ -37,15 +37,18 @@ static ggml_type get_export_tensor_type(ModelLoader& model_loader,
     ggml_type tensor_type   = tensor_storage.type;
     ggml_type dst_type      = type;
 
+    bool has_explicit_type  = false;
     for (const auto& tensor_type_rule : tensor_type_rules) {
         std::regex pattern(tensor_type_rule.first);
         if (std::regex_search(name, pattern)) {
             dst_type = tensor_type_rule.second;
+            has_explicit_type = true;
             break;
         }
     }
 
-    if (model_loader.tensor_should_be_converted(tensor_storage, dst_type)) {
+    if ((has_explicit_type && !ggml_is_quantized(dst_type)) ||
+        model_loader.tensor_should_be_converted(tensor_storage, dst_type)) {
         tensor_type = dst_type;
     }
 

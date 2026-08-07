@@ -1785,6 +1785,96 @@ static bool parse_image_array_json_field(const json& parent,
     return true;
 }
 
+static bool decode_base64_audio(const std::string& encoded_input, SDAudioOwner& out_audio) {
+    std::string encoded = encoded_input;
+    auto comma_pos      = encoded.find(',');
+    if (comma_pos != std::string::npos) {
+        encoded = encoded.substr(comma_pos + 1);
+    }
+    std::vector<uint8_t> audio_bytes = decode_base64_bytes(encoded);
+    std::vector<float> samples;
+    uint32_t sample_rate = 0;
+    uint32_t channels    = 0;
+    if (audio_bytes.empty() ||
+        !load_wav_from_memory(audio_bytes.data(), audio_bytes.size(), samples, sample_rate, channels)) {
+        return false;
+    }
+    out_audio.reset(std::move(samples), sample_rate, channels);
+    return true;
+}
+
+static bool parse_audio_array_json_field(const json& parent,
+                                         const char* key,
+                                         std::vector<SDAudioOwner>& out_audios,
+                                         bool allow_null_items = false) {
+    if (!parent.contains(key)) {
+        return true;
+    }
+    if (parent.at(key).is_null()) {
+        out_audios.clear();
+        return true;
+    }
+    if (!parent.at(key).is_array()) {
+        return false;
+    }
+    out_audios.clear();
+    for (const auto& item : parent.at(key)) {
+        if (allow_null_items && item.is_null()) {
+            out_audios.emplace_back();
+            continue;
+        }
+        if (!item.is_string()) {
+            return false;
+        }
+        SDAudioOwner audio;
+        if (!decode_base64_audio(item.get<std::string>(), audio)) {
+            return false;
+        }
+        out_audios.push_back(std::move(audio));
+    }
+    return true;
+}
+
+static bool parse_video_array_json_field(const json& parent,
+                                         const char* key,
+                                         int expected_width,
+                                         int expected_height,
+                                         std::vector<std::vector<SDImageOwner>>& out_videos) {
+    if (!parent.contains(key)) {
+        return true;
+    }
+    if (parent.at(key).is_null()) {
+        out_videos.clear();
+        return true;
+    }
+    if (!parent.at(key).is_array()) {
+        return false;
+    }
+    out_videos.clear();
+    for (const auto& video_json : parent.at(key)) {
+        if (!video_json.is_array()) {
+            return false;
+        }
+        std::vector<SDImageOwner> frames;
+        for (const auto& frame_json : video_json) {
+            if (!frame_json.is_string()) {
+                return false;
+            }
+            SDImageOwner frame;
+            if (!decode_base64_image(frame_json.get<std::string>(), 3, expected_width, expected_height, frame)) {
+                return false;
+            }
+            frames.push_back(std::move(frame));
+        }
+        if (frames.empty()) {
+            return false;
+        }
+        out_videos.push_back(std::move(frames));
+    }
+    return true;
+}
+
+
 static bool parse_lora_json_field(const json& parent,
                                   const std::function<std::string(const std::string&)>& lora_path_resolver,
                                   std::map<std::string, float>& lora_map,
@@ -2095,6 +2185,19 @@ bool SDGenerationParams::from_json_str(
     }
     if (!parse_image_array_json_field(j, "ref_images", 3, width, height, ref_images)) {
         LOG_ERROR("invalid ref_images");
+        return false;
+    }
+
+    if (!parse_video_array_json_field(j, "ref_videos", width, height, ref_videos)) {
+        LOG_ERROR("invalid ref_videos");
+        return false;
+    }
+    if (!parse_audio_array_json_field(j, "ref_video_audios", ref_video_audios, true)) {
+        LOG_ERROR("invalid ref_video_audios");
+        return false;
+    }
+    if (!parse_audio_array_json_field(j, "ref_audios", ref_audios)) {
+        LOG_ERROR("invalid ref_audios");
         return false;
     }
     if (!parse_image_array_json_field(j, "control_frames", 3, width, height, control_frames)) {

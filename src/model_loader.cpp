@@ -537,6 +537,19 @@ SDVersion ModelLoader::get_sd_version() {
         if (tensor_storage.name.find("model.diffusion_model.adaln_single.emb.timestep_embedder.linear_1.bias") != std::string::npos) {
             return VERSION_LTXAV;
         }
+        if (ends_with(tensor_storage.name, "decoder.register_tokens") &&
+            tensor_storage_map.find("vae.encoder.down_blocks.0.resnets.0.conv1.weight") != tensor_storage_map.end()) {
+            return VERSION_MINIMAX_H3;
+        }
+
+        if (ends_with(tensor_storage.name, "proj_in.weight")) {
+            std::string raw_prefix = tensor_storage.name.substr(0, tensor_storage.name.size() - strlen("proj_in.weight"));
+            if (tensor_storage_map.find(raw_prefix + "audio_proj_in.weight") != tensor_storage_map.end() &&
+                tensor_storage_map.find(raw_prefix + "transformer_blocks.0.attn.to_q.weight") != tensor_storage_map.end()) {
+                return VERSION_MINIMAX_H3;
+            }
+        }
+
         if (tensor_storage.name.find("model.diffusion_model.video_patch_proj.weight") != std::string::npos &&
             tensor_storage_map.find("model.diffusion_model.audio_patch_proj.weight") != tensor_storage_map.end()) {
             return VERSION_MINIMAX_H3;

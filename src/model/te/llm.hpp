@@ -259,6 +259,12 @@ namespace LLM {
                 if (contains(name, "layers.0.mlp.gate_proj.weight")) {
                     config.intermediate_size = tensor_storage.ne[1];
                 }
+                if (contains(name, "layers.0.self_attn.q_proj.weight")) {
+                    config.num_heads = static_cast<int>(tensor_storage.ne[1] / config.head_dim);
+                }
+                if (contains(name, "layers.0.self_attn.k_proj.weight")) {
+                    config.num_kv_heads = static_cast<int>(tensor_storage.ne[1] / config.head_dim);
+                }
                 if (contains(name, "layers.0.mlp.experts.gate_up_proj.weight")) {
                     config.intermediate_size = tensor_storage.ne[1] / 2;
                 }

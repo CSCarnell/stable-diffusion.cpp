@@ -34,6 +34,7 @@ namespace MiniMaxH3 {
         int64_t time_embed_dim           = 2688;
         int64_t rope_inv_freq_len        = 16;
         int64_t adaln_curve_grid         = 0;
+        bool split_qkv                    = false;
         int patch_t                      = 1;
         int patch_h                      = 2;
         int patch_w                      = 2;
@@ -83,6 +84,9 @@ namespace MiniMaxH3 {
             }
             if (const auto* weight = find("blocks.0.attn.qkv_proj.weight")) {
                 config.num_attention_heads = weight->ne[1] / (3 * config.attention_head_dim);
+            } else if (const auto* weight = find("blocks.0.attn.q_proj.weight")) {
+                config.num_attention_heads = weight->ne[1] / config.attention_head_dim;
+                config.split_qkv            = true;
             }
             if (const auto* weight = find("blocks.0.mlp.fc1.weight")) {
                 config.ffn_hidden_size = weight->ne[1] / 2;
@@ -184,14 +188,22 @@ namespace MiniMaxH3 {
     struct Attention : public GGMLBlock {
         int64_t heads;
         int64_t head_dim;
+        bool split_qkv;
 
         Attention(int64_t hidden_size,
                   int64_t heads,
                   int64_t head_dim,
-                  float eps)
-            : heads(heads), head_dim(head_dim) {
-            int64_t inner      = heads * head_dim;
-            blocks["qkv_proj"] = std::make_shared<Linear>(hidden_size, inner * 3, false);
+                  float eps,
+                  bool split_qkv)
+            : heads(heads), head_dim(head_dim), split_qkv(split_qkv) {
+            int64_t inner = heads * head_dim;
+            if (split_qkv) {
+                blocks["q_proj"] = std::make_shared<Linear>(hidden_size, inner, false);
+                blocks["k_proj"] = std::make_shared<Linear>(hidden_size, inner, false);
+                blocks["v_proj"] = std::make_shared<Linear>(hidden_size, inner, false);
+            } else {
+                blocks["qkv_proj"] = std::make_shared<Linear>(hidden_size, inner * 3, false);
+            }
             blocks["q_norm"]   = std::make_shared<RMSNorm>(head_dim, eps);
             blocks["k_norm"]   = std::make_shared<RMSNorm>(head_dim, eps);
             blocks["out_proj"] = std::make_shared<Linear>(inner, hidden_size, false);
@@ -200,17 +212,29 @@ namespace MiniMaxH3 {
         ggml_tensor* forward(GGMLRunnerContext* ctx,
                              ggml_tensor* x,
                              ggml_tensor* pe = nullptr) {
-            auto qkv_proj = std::dynamic_pointer_cast<Linear>(blocks["qkv_proj"]);
             auto q_norm   = std::dynamic_pointer_cast<RMSNorm>(blocks["q_norm"]);
             auto k_norm   = std::dynamic_pointer_cast<RMSNorm>(blocks["k_norm"]);
             auto out_proj = std::dynamic_pointer_cast<Linear>(blocks["out_proj"]);
 
             int64_t sequence = x->ne[1];
             int64_t batch    = x->ne[2] * x->ne[3];
-            auto qkv         = ggml_ext_chunk(ctx->ggml_ctx, qkv_proj->forward(ctx, x), 3, 0);
-            auto q           = ggml_reshape_4d(ctx->ggml_ctx, qkv[0], head_dim, heads, sequence, batch);
-            auto k           = ggml_reshape_4d(ctx->ggml_ctx, qkv[1], head_dim, heads, sequence, batch);
-            auto v           = ggml_reshape_4d(ctx->ggml_ctx, qkv[2], head_dim, heads, sequence, batch);
+            ggml_tensor* q;
+            ggml_tensor* k;
+            ggml_tensor* v;
+            if (split_qkv) {
+                q = std::dynamic_pointer_cast<Linear>(blocks["q_proj"])->forward(ctx, x);
+                k = std::dynamic_pointer_cast<Linear>(blocks["k_proj"])->forward(ctx, x);
+                v = std::dynamic_pointer_cast<Linear>(blocks["v_proj"])->forward(ctx, x);
+            } else {
+                auto qkv_proj = std::dynamic_pointer_cast<Linear>(blocks["qkv_proj"]);
+                auto qkv      = ggml_ext_chunk(ctx->ggml_ctx, qkv_proj->forward(ctx, x), 3, 0);
+                q             = qkv[0];
+                k             = qkv[1];
+                v             = qkv[2];
+            }
+            q = ggml_reshape_4d(ctx->ggml_ctx, q, head_dim, heads, sequence, batch);
+            k = ggml_reshape_4d(ctx->ggml_ctx, k, head_dim, heads, sequence, batch);
+            v = ggml_reshape_4d(ctx->ggml_ctx, v, head_dim, heads, sequence, batch);
             q                = q_norm->forward(ctx, q);
             k                = k_norm->forward(ctx, k);
             if (pe != nullptr) {
@@ -239,9 +263,10 @@ namespace MiniMaxH3 {
             blocks["norm1"] = std::make_shared<RMSNorm>(config.hidden_size, config.norm_eps);
             blocks["norm2"] = std::make_shared<RMSNorm>(config.hidden_size, config.norm_eps);
             blocks["attn"]  = std::make_shared<Attention>(config.hidden_size,
-                                                         config.num_attention_heads,
-                                                         config.attention_head_dim,
-                                                         config.qk_norm_eps);
+                                                          config.num_attention_heads,
+                                                          config.attention_head_dim,
+                                                          config.qk_norm_eps,
+                                                          config.split_qkv);
             blocks["mlp"]   = std::make_shared<MLP>(config.hidden_size, config.ffn_hidden_size);
         }
 
@@ -393,9 +418,10 @@ namespace MiniMaxH3 {
             blocks["norm1"]      = std::make_shared<RMSNorm>(config.hidden_size, config.norm_eps);
             blocks["norm2"]      = std::make_shared<RMSNorm>(config.hidden_size, config.norm_eps);
             blocks["attn"]       = std::make_shared<Attention>(config.hidden_size,
-                                                         config.num_attention_heads,
-                                                         config.attention_head_dim,
-                                                         config.qk_norm_eps);
+                                                          config.num_attention_heads,
+                                                          config.attention_head_dim,
+                                                          config.qk_norm_eps,
+                                                          config.split_qkv);
             blocks["mlp"]        = std::make_shared<MLP>(config.hidden_size,
                                                   config.ffn_hidden_size);
             blocks["adaln_proj"] = std::make_shared<AdaLayerNormModulation>(config.time_embed_dim,

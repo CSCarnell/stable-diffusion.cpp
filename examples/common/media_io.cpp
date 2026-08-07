@@ -10,6 +10,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1387,15 +1389,13 @@ static uint32_t read_le32(const uint8_t* data) {
            (static_cast<uint32_t>(data[3]) << 24);
 }
 
-bool load_wav_from_file(const std::string& path,
-                        std::vector<float>& interleaved_samples,
-                        uint32_t& sample_rate,
-                        uint32_t& channels) {
+static bool load_wav_from_stream(std::istream& file,
+                                 std::vector<float>& interleaved_samples,
+                                 uint32_t& sample_rate,
+                                 uint32_t& channels) {
     interleaved_samples.clear();
     sample_rate = 0;
     channels    = 0;
-
-    std::ifstream file(path, std::ios::binary);
     uint8_t riff_header[12];
     if (!file.read(reinterpret_cast<char*>(riff_header), sizeof(riff_header)) ||
         std::memcmp(riff_header, "RIFF", 4) != 0 ||
@@ -1502,4 +1502,28 @@ bool load_wav_from_file(const std::string& path,
         }
     }
     return true;
+}
+
+bool load_wav_from_memory(const uint8_t* data,
+                          size_t size,
+                          std::vector<float>& interleaved_samples,
+                          uint32_t& sample_rate,
+                          uint32_t& channels) {
+    if (data == nullptr || size == 0) {
+        return false;
+    }
+    std::string bytes(reinterpret_cast<const char*>(data), size);
+    std::istringstream stream(std::move(bytes), std::ios::binary);
+    return load_wav_from_stream(stream, interleaved_samples, sample_rate, channels);
+}
+
+bool load_wav_from_file(const std::string& path,
+                        std::vector<float>& interleaved_samples,
+                        uint32_t& sample_rate,
+                        uint32_t& channels) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        return false;
+    }
+    return load_wav_from_stream(file, interleaved_samples, sample_rate, channels);
 }

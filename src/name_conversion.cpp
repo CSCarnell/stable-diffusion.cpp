@@ -882,6 +882,36 @@ static bool is_diffusers_controlnet_name(const std::string& name) {
     return false;
 }
 
+static std::string convert_diffusers_dit_to_original_minimax_h3(std::string name) {
+    static const std::vector<std::pair<std::string, std::string>> name_map = {
+        {"audio_proj_in.", "audio_patch_proj."},
+        {"audio_proj_out.", "final_layer.audio_out."},
+        {"context_embedder.", "condition_proj."},
+        {"norm_out.linear.", "final_layer.adaln_proj.linear."},
+        {"norm_out.norm.", "final_layer.norm."},
+        {"time_embedder.linear_1.", "time_embedder.proj_in."},
+        {"time_embedder.linear_2.", "time_embedder.proj_out."},
+        {"token_refiner.refiner_blocks.", "token_refiner.blocks."},
+        {"transformer_blocks.", "blocks."},
+        {".attn.norm_q.", ".attn.q_norm."},
+        {".attn.norm_k.", ".attn.k_norm."},
+        {".attn.to_q.", ".attn.q_proj."},
+        {".attn.to_k.", ".attn.k_proj."},
+        {".attn.to_v.", ".attn.v_proj."},
+        {".attn.to_out.0.", ".attn.out_proj."},
+        {".ff.net.0.proj.", ".mlp.fc1."},
+        {".ff.net.2.", ".mlp.fc2."},
+    };
+    if (starts_with(name, "proj_in.")) {
+        name.replace(0, strlen("proj_in."), "video_patch_proj.");
+    } else if (starts_with(name, "proj_out.")) {
+        name.replace(0, strlen("proj_out."), "final_layer.video_out.");
+    }
+    replace_with_name_map(name, name_map);
+    return name;
+}
+
+
 std::string convert_diffusion_model_name(std::string name, std::string prefix, SDVersion version) {
     if (sd_version_is_sd1(version) || sd_version_is_sd2(version)) {
         name = convert_diffusers_unet_to_original_sd1(name);
@@ -899,6 +929,8 @@ std::string convert_diffusion_model_name(std::string name, std::string prefix, S
         name = convert_other_dit_to_original_anima(name);
     } else if (sd_version_is_krea2(version)) {
         name = convert_diffusers_dit_to_original_krea2(name);
+    } else if (sd_version_is_minimax_h3(version)) {
+        name = convert_diffusers_dit_to_original_minimax_h3(name);
     }
     return name;
 }
@@ -1066,7 +1098,21 @@ std::string convert_diffusers_to_original_wan_vae(std::string name) {
 }
 
 std::string convert_first_stage_model_name(std::string name, std::string prefix, SDVersion version) {
-    if (sd_version_is_hunyuan_video(version) || sd_version_is_mage_flow(version) || sd_version_is_minimax_h3(version)) {
+    if (sd_version_is_minimax_h3(version)) {
+        static const std::vector<std::pair<std::string, std::string>> name_map = {
+            {"decoder.proj_in.", "decoder.x_embedder."},
+            {".attn.to_out.0.", ".attn.to_out."},
+            {".ff.net.0.proj.", ".ff.w1."},
+            {".ff.net.2.", ".ff.w2."},
+            {"encoder.down_blocks.", "encoder.down."},
+            {".downsamplers.0.", ".downsample."},
+            {".resnets.", ".block."},
+            {".conv_shortcut.", ".nin_shortcut."},
+        };
+        replace_with_name_map(name, name_map);
+        return name;
+    }
+    if (sd_version_is_hunyuan_video(version) || sd_version_is_mage_flow(version)) {
         return name;
     }
     if (sd_version_uses_wan_vae(version)) {
@@ -1493,6 +1539,14 @@ std::string convert_tensor_name(std::string name, SDVersion version) {
         }
         if (starts_with(name, "text_encoders.llm.visual.")) {
             name = convert_qwen3_vl_vision_name(std::move(name));
+        }
+    }
+
+
+    if (sd_version_is_minimax_h3(version)) {
+        const std::string hf_language_prefix = "text_encoders.llm.model.language_model.";
+        if (starts_with(name, hf_language_prefix)) {
+            name = "text_encoders.llm.model." + name.substr(hf_language_prefix.size());
         }
     }
 

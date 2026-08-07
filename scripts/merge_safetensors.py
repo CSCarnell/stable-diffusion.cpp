@@ -14,6 +14,8 @@ import json
 import os
 import re
 import struct
+
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -326,7 +328,42 @@ def write_output(entries: list[TensorEntry]) -> None:
     print(f"Done: {output_path} ({format_bytes(output_path.stat().st_size)})")
 
 
+def configure_from_args() -> None:
+    parser = argparse.ArgumentParser(
+        description="Merge sharded or selected SafeTensors files without loading tensor data."
+    )
+    parser.add_argument("output", nargs="?", help="output .safetensors path")
+    parser.add_argument("sources", nargs="*", help="source .safetensors files")
+    parser.add_argument("--index", type=Path, help="SafeTensors index JSON; sources are resolved from its directory")
+    parser.add_argument("--overwrite", action="store_true", help="replace an existing output")
+    args = parser.parse_args()
+
+    if args.output is None and args.index is None and not args.sources:
+        return  # Preserve the legacy editable SOURCE_RULES configuration.
+    if args.output is None:
+        parser.error("output is required")
+    if args.index is not None and args.sources:
+        parser.error("use either --index or explicit sources, not both")
+
+    sources = [Path(path) for path in args.sources]
+    if args.index is not None:
+        with args.index.open("r", encoding="utf-8") as file:
+            index = json.load(file)
+        weight_map = index.get("weight_map")
+        if not isinstance(weight_map, dict) or not weight_map:
+            parser.error(f"{args.index} does not contain a non-empty weight_map")
+        sources = [args.index.parent / name for name in dict.fromkeys(weight_map.values())]
+    if not sources:
+        parser.error("at least one source or --index is required")
+
+    global OUTPUT_PATH, SOURCE_RULES, OVERWRITE_OUTPUT
+    OUTPUT_PATH = Path(args.output)
+    SOURCE_RULES = [{"path": source, "include": [r".*"], "exclude": []} for source in sources]
+    OVERWRITE_OUTPUT = args.overwrite
+
+
 def main() -> None:
+    configure_from_args()
     entries = collect_entries()
     write_output(entries)
 

@@ -250,43 +250,39 @@ namespace MiniMaxH3VAE {
         static constexpr int dim      = num_head * head_dim;
 
         DecoderAttention() {
-            blocks["to_qkv"] = std::make_shared<Linear>(dim, dim * 3, true);
+            blocks["to_q"]   = std::make_shared<Linear>(dim, dim, true);
+            blocks["to_k"]   = std::make_shared<Linear>(dim, dim, true);
+            blocks["to_v"]   = std::make_shared<Linear>(dim, dim, true);
             blocks["to_out"] = std::make_shared<Linear>(dim, dim, true);
         }
 
         ggml_tensor* forward(GGMLRunnerContext* ctx,
                              ggml_tensor* x,
                              ggml_tensor* pe) {
-            auto to_qkv         = std::dynamic_pointer_cast<Linear>(blocks["to_qkv"]);
-            auto to_out         = std::dynamic_pointer_cast<Linear>(blocks["to_out"]);
-            auto qkv_projection = to_qkv->forward(ctx, x);
-            int64_t sequence    = x->ne[1];
-            int64_t batch_size  = x->ne[2] * x->ne[3];
-            qkv_projection      = ggml_reshape_4d(ctx->ggml_ctx,
-                                                  qkv_projection,
-                                                  3 * head_dim,
-                                                  num_head,
-                                                  sequence,
-                                                  batch_size);
-            auto qkv            = ggml_ext_chunk(ctx->ggml_ctx, qkv_projection, 3, 0);
-            auto q              = ggml_reshape_4d(ctx->ggml_ctx,
-                                                  qkv[0],
-                                                  head_dim,
-                                                  num_head,
-                                                  sequence,
-                                                  batch_size);
-            auto k              = ggml_reshape_4d(ctx->ggml_ctx,
-                                                  qkv[1],
-                                                  head_dim,
-                                                  num_head,
-                                                  sequence,
-                                                  batch_size);
-            auto v              = ggml_reshape_4d(ctx->ggml_ctx,
-                                                  qkv[2],
-                                                  head_dim,
-                                                  num_head,
-                                                  sequence,
-                                                  batch_size);
+            auto to_q         = std::dynamic_pointer_cast<Linear>(blocks["to_q"]);
+            auto to_k         = std::dynamic_pointer_cast<Linear>(blocks["to_k"]);
+            auto to_v         = std::dynamic_pointer_cast<Linear>(blocks["to_v"]);
+            auto to_out       = std::dynamic_pointer_cast<Linear>(blocks["to_out"]);
+            int64_t sequence  = x->ne[1];
+            int64_t batch_size = x->ne[2] * x->ne[3];
+            auto q            = ggml_reshape_4d(ctx->ggml_ctx,
+                                                to_q->forward(ctx, x),
+                                                head_dim,
+                                                num_head,
+                                                sequence,
+                                                batch_size);
+            auto k            = ggml_reshape_4d(ctx->ggml_ctx,
+                                                to_k->forward(ctx, x),
+                                                head_dim,
+                                                num_head,
+                                                sequence,
+                                                batch_size);
+            auto v            = ggml_reshape_4d(ctx->ggml_ctx,
+                                                to_v->forward(ctx, x),
+                                                head_dim,
+                                                num_head,
+                                                sequence,
+                                                batch_size);
             q                   = ggml_rms_norm(ctx->ggml_ctx, q, 1e-5f);
             k                   = ggml_rms_norm(ctx->ggml_ctx, k, 1e-5f);
             q                   = apply_partial_rope(ctx->ggml_ctx, q, pe);
@@ -392,7 +388,6 @@ namespace MiniMaxH3VAE {
                                                            GGML_TYPE_F32,
                                                            dim,
                                                            num_register_tokens);
-            params["mask_token"]      = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, dim);
         }
 
         ggml_tensor* forward(GGMLRunnerContext* ctx,
