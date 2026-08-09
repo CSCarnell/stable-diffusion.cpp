@@ -158,9 +158,10 @@ namespace MiniMaxH3 {
             auto fc1 = std::dynamic_pointer_cast<Linear>(blocks["fc1"]);
             auto fc2 = std::dynamic_pointer_cast<Linear>(blocks["fc2"]);
             auto uv  = ggml_ext_chunk(ctx->ggml_ctx, fc1->forward(ctx, x), 2, 0);
+            // Diffusers SwiGLU splits the projection as (value, gate).
             return fc2->forward(ctx, ggml_mul(ctx->ggml_ctx,
-                                              ggml_silu(ctx->ggml_ctx, uv[0]),
-                                              uv[1]));
+                                              uv[0],
+                                              ggml_silu(ctx->ggml_ctx, uv[1])));
         }
     };
 
@@ -1080,8 +1081,9 @@ namespace MiniMaxH3 {
                 audio_condition_inputs.push_back(make_input(condition));
             }
 
-            float sigma_v = std::clamp(timestep[0] / 1000.f, 1e-6f, 1.f);
-            float t_v     = 1.f - sigma_v;
+            // MiniMax-H3 consumes clean-ward time directly: t = 1 - sigma.
+            float t_v     = std::clamp(timestep[0], 0.f, 1.f);
+            float sigma_v = std::clamp(1.f - t_v, 1e-6f, 1.f);
             float t_a     = 1.f - time_shift_sigma(sigma_v, video_shift, audio_shift);
             auto layout   = build_layout(context_tensor.shape()[1],
                                          video_input_cache.shape()[2],

@@ -1286,6 +1286,45 @@ struct DiscreteFlowDenoiser : public Denoiser {
     }
 };
 
+// MiniMax-H3 uses data-ward velocity and defines t = 1 - sigma on [0, 1].
+// Its requested step count includes the terminal zero sigma, so N points drive N-1 evaluations.
+struct MiniMaxH3FlowDenoiser : public DiscreteFlowDenoiser {
+    using DiscreteFlowDenoiser::DiscreteFlowDenoiser;
+
+    float sigma_to_t(float sigma) override {
+        return 1.0f - sigma;
+    }
+
+    float t_to_sigma(float t) override {
+        return 1.0f - t;
+    }
+
+    std::vector<float> get_sigmas(uint32_t n,
+                                  int image_seq_len,
+                                  scheduler_t scheduler_type,
+                                  SDVersion version,
+                                  const char* extra_sample_args = nullptr) override {
+        SD_UNUSED(image_seq_len);
+        SD_UNUSED(scheduler_type);
+        SD_UNUSED(version);
+        SD_UNUSED(extra_sample_args);
+
+        std::vector<float> sigmas;
+        if (n < 2) {
+            return sigmas;
+        }
+        sigmas.reserve(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            const float base  = 1.0f - static_cast<float>(i) / static_cast<float>(n - 1);
+            const float sigma = time_snr_shift(shift, base);
+            if (sigmas.empty() || sigma != sigmas.back()) {
+                sigmas.push_back(sigma);
+            }
+        }
+        return sigmas;
+    }
+};
+
 struct FluxFlowDenoiser : public DiscreteFlowDenoiser {
     FluxFlowDenoiser() = default;
 

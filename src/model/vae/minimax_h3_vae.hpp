@@ -315,8 +315,8 @@ namespace MiniMaxH3VAE {
             auto gate = ggml_ext_chunk(ctx->ggml_ctx, w1->forward(ctx, x), 2, 0);
             return w2->forward(ctx,
                                ggml_mul(ctx->ggml_ctx,
-                                        ggml_silu(ctx->ggml_ctx, gate[0]),
-                                        gate[1]));
+                                        gate[0],
+                                        ggml_silu(ctx->ggml_ctx, gate[1])));
         }
     };
 
@@ -399,8 +399,9 @@ namespace MiniMaxH3VAE {
             int64_t batch_size = z->ne[3] / 24;
             GGML_ASSERT(batch_size == 1);
 
-            z                   = ggml_cont(ctx->ggml_ctx,
-                                            ggml_ext_torch_permute(ctx->ggml_ctx, z, 3, 0, 1, 2));
+            // GGML stores [W,H,T,C]; this produces contiguous [C,W,H,T] so each token owns 24 channels.
+            z = ggml_cont(ctx->ggml_ctx,
+                          ggml_ext_torch_permute(ctx->ggml_ctx, z, 3, 0, 1, 2));
             z                   = ggml_reshape_3d(ctx->ggml_ctx,
                                                   z,
                                                   24,

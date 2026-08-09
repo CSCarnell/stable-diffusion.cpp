@@ -1842,6 +1842,9 @@ public:
                     if (sd_version_is_ltxav(version)) {
                         LOG_INFO("running in LTXAV FLOW mode");
                         denoiser = std::make_shared<FluxFlowDenoiser>();
+                    } else if (sd_version_is_minimax_h3(version)) {
+                        LOG_INFO("running in MiniMax-H3 FLOW mode");
+                        denoiser = std::make_shared<MiniMaxH3FlowDenoiser>();
                     } else {
                         LOG_INFO("running in FLOW mode");
                         denoiser = std::make_shared<DiscreteFlowDenoiser>();
@@ -2399,6 +2402,9 @@ public:
             shifted_t             = std::max((int64_t)0, std::min((int64_t)(TIMESTEPS - 1), shifted_t));
             LOG_DEBUG("shifting timestep from %.2f to %" PRId64 " (sigma: %.4f)", t, shifted_t, sigma);
             return std::vector<float>{(float)shifted_t};
+        }
+        if (sd_version_is_minimax_h3(version)) {
+            return std::vector<float>{t};
         }
         if (sd_version_is_anima(version)) {
             return std::vector<float>{t / static_cast<float>(TIMESTEPS)};
@@ -4246,6 +4252,10 @@ struct GenerationRequest {
         resolve_hires();
         seed = resolve_seed(seed);
 
+        if (sd_version_is_minimax_h3(sd_ctx->sd->version) && guidance.txt_cfg != 1.f) {
+            LOG_WARN("MiniMax-H3 does not use classifier-free guidance; overriding CFG scale %.2f to 1.0", guidance.txt_cfg);
+            guidance.txt_cfg = 1.f;
+        }
         resolve_guidance(sd_ctx, &guidance, &use_uncond, &use_img_uncond, has_ref_images);
         if (sd_ctx->sd->high_noise_diffusion_model) {
             resolve_guidance(sd_ctx,
@@ -4339,6 +4349,11 @@ struct SamplePlan {
                                                       scheduler,
                                                       sd_ctx->sd->version,
                                                       sample_params->extra_sample_args);
+        }
+
+        if (sigmas.size() < 2) {
+            LOG_ERROR("sampling requires at least two sigma points (requested steps: %d)", total_steps);
+            sigmas.clear();
         }
 
         eta = resolve_eta(sd_ctx, eta, sample_method);
@@ -6859,6 +6874,9 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
     sd_ctx->sd->reset_generation_extensions();
 
     SamplePlan plan(sd_ctx, sd_vid_gen_params, request);
+    if (plan.sigmas.size() < 2) {
+        return false;
+    }
     auto latent_inputs_opt = prepare_video_generation_latents(sd_ctx, sd_vid_gen_params, &request);
     if (!latent_inputs_opt.has_value()) {
         return false;
