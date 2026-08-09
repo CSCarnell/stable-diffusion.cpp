@@ -254,25 +254,36 @@ void refresh_lora_cache(ServerRuntime& rt) {
     std::vector<LoraEntry> new_cache;
 
     fs::path lora_dir = rt.ctx_params->lora_model_dir;
-    if (fs::exists(lora_dir) && fs::is_directory(lora_dir)) {
-        for (auto& entry : fs::recursive_directory_iterator(lora_dir, fs::directory_options::skip_permission_denied)) {
-            if (!entry.is_regular_file()) {
-                continue;
-            }
-            const fs::path& p = entry.path();
-            if (!is_supported_model_ext(p)) {
-                continue;
-            }
+    try {
+        if (fs::exists(lora_dir) && fs::is_directory(lora_dir)) {
+            for (auto& entry : fs::recursive_directory_iterator(lora_dir, fs::directory_options::skip_permission_denied)) {
+                std::error_code status_error;
+                if (!entry.is_regular_file(status_error) || status_error) {
+                    if (status_error) {
+                        LOG_WARN("skipping unreadable LoRA entry '%s': %s",
+                                 entry.path().u8string().c_str(),
+                                 status_error.message().c_str());
+                    }
+                    continue;
+                }
+                const fs::path& p = entry.path();
+                if (!is_supported_model_ext(p)) {
+                    continue;
+                }
 
-            LoraEntry lora_entry;
-            lora_entry.name     = p.stem().u8string();
-            lora_entry.fullpath = p.u8string();
-            std::string rel     = p.lexically_relative(lora_dir).u8string();
-            std::replace(rel.begin(), rel.end(), '\\', '/');
-            lora_entry.path = rel;
+                LoraEntry lora_entry;
+                lora_entry.name     = p.stem().u8string();
+                lora_entry.fullpath = p.u8string();
+                std::string rel     = p.lexically_relative(lora_dir).u8string();
+                std::replace(rel.begin(), rel.end(), '\\', '/');
+                lora_entry.path = rel;
 
-            new_cache.push_back(std::move(lora_entry));
+                new_cache.push_back(std::move(lora_entry));
+            }
         }
+    } catch (const fs::filesystem_error& e) {
+        // LoRA discovery is optional and must never make generation requests fail.
+        LOG_WARN("stopped scanning LoRA directory '%s': %s", lora_dir.u8string().c_str(), e.what());
     }
 
     std::sort(new_cache.begin(), new_cache.end(), [](const LoraEntry& a, const LoraEntry& b) {
