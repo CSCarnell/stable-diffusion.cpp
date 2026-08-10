@@ -1706,7 +1706,8 @@ bool decode_base64_image(const std::string& encoded_input,
                          int target_channels,
                          int expected_width,
                          int expected_height,
-                         SDImageOwner& out_image) {
+                         SDImageOwner& out_image,
+                         bool fit_with_padding) {
     std::string encoded = encoded_input;
     auto comma_pos      = encoded.find(',');
     if (comma_pos != std::string::npos) {
@@ -1726,7 +1727,8 @@ bool decode_base64_image(const std::string& encoded_input,
                                                 decoded_height,
                                                 expected_width,
                                                 expected_height,
-                                                target_channels);
+                                                 target_channels,
+                                                 fit_with_padding);
     if (raw_data == nullptr) {
         return false;
     }
@@ -1740,7 +1742,8 @@ static bool parse_image_json_field(const json& parent,
                                    int channels,
                                    int expected_width,
                                    int expected_height,
-                                   SDImageOwner& out_image) {
+                                    SDImageOwner& out_image,
+                                    bool fit_with_padding = false) {
     if (!parent.contains(key)) {
         return true;
     }
@@ -1751,7 +1754,7 @@ static bool parse_image_json_field(const json& parent,
     if (!parent.at(key).is_string()) {
         return false;
     }
-    return decode_base64_image(parent.at(key).get<std::string>(), channels, expected_width, expected_height, out_image);
+    return decode_base64_image(parent.at(key).get<std::string>(), channels, expected_width, expected_height, out_image, fit_with_padding);
 }
 
 static bool parse_image_array_json_field(const json& parent,
@@ -1777,7 +1780,7 @@ static bool parse_image_array_json_field(const json& parent,
             return false;
         }
         SDImageOwner image;
-        if (!decode_base64_image(item.get<std::string>(), channels, expected_width, expected_height, image)) {
+        if (!decode_base64_image(item.get<std::string>(), channels, expected_width, expected_height, image, false)) {
             return false;
         }
         out_images.push_back(std::move(image));
@@ -1861,7 +1864,7 @@ static bool parse_video_array_json_field(const json& parent,
                 return false;
             }
             SDImageOwner frame;
-            if (!decode_base64_image(frame_json.get<std::string>(), 3, expected_width, expected_height, frame)) {
+            if (!decode_base64_image(frame_json.get<std::string>(), 3, 0, 0, frame, false)) {
                 return false;
             }
             frames.push_back(std::move(frame));
@@ -2175,20 +2178,20 @@ bool SDGenerationParams::from_json_str(
         LOG_ERROR("invalid lora");
         return false;
     }
-    if (!parse_image_json_field(j, "init_image", 3, width, height, init_image)) {
+    if (!parse_image_json_field(j, "init_image", 3, width, height, init_image, true)) {
         LOG_ERROR("invalid init_image");
         return false;
     }
-    if (!parse_image_json_field(j, "end_image", 3, width, height, end_image)) {
+    if (!parse_image_json_field(j, "end_image", 3, width, height, end_image, true)) {
         LOG_ERROR("invalid end_image");
         return false;
     }
-    if (!parse_image_array_json_field(j, "ref_images", 3, width, height, ref_images)) {
+    if (!parse_image_array_json_field(j, "ref_images", 3, 0, 0, ref_images)) {
         LOG_ERROR("invalid ref_images");
         return false;
     }
 
-    if (!parse_video_array_json_field(j, "ref_videos", width, height, ref_videos)) {
+    if (!parse_video_array_json_field(j, "ref_videos", 0, 0, ref_videos)) {
         LOG_ERROR("invalid ref_videos");
         return false;
     }

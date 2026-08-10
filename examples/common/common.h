@@ -112,7 +112,8 @@ bool decode_base64_image(const std::string& encoded_input,
                          int target_channels,
                          int expected_width,
                          int expected_height,
-                         SDImageOwner& out_image);
+                         SDImageOwner& out_image,
+                         bool fit_with_padding = false);
 
 struct SDContextParams {
     int n_threads = -1;

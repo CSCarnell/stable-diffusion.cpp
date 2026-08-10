@@ -51,7 +51,8 @@ uint8_t* load_image_from_memory(const char* image_bytes,
                                 int& height,
                                 int expected_width   = 0,
                                 int expected_height  = 0,
-                                int expected_channel = 3);
+                                int expected_channel = 3,
+                                bool fit_with_padding = false);
 
 int create_mjpg_avi_from_sd_images(const char* filename,
                                    sd_image_t* images,

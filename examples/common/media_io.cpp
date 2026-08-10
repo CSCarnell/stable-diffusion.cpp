@@ -483,7 +483,8 @@ uint8_t* load_image_common(bool from_memory,
                            int& height,
                            int expected_width,
                            int expected_height,
-                           int expected_channel) {
+                            int expected_channel,
+                            bool fit_with_padding = false) {
     const char* image_path;
     FreeUniquePtr<uint8_t> image_buffer;
     int source_channel_count = 0;
@@ -559,6 +560,34 @@ uint8_t* load_image_common(bool from_memory,
     }
 
     if ((expected_width > 0 && expected_height > 0) && (height != expected_height || width != expected_width)) {
+        if (fit_with_padding) {
+            const float scale = std::min((float) expected_width / width, (float) expected_height / height);
+            const int fit_w = std::max(1, (int) std::round(width * scale));
+            const int fit_h = std::max(1, (int) std::round(height * scale));
+            FreeUniquePtr<uint8_t> fitted((uint8_t*) malloc((size_t) fit_w * fit_h * expected_channel));
+            FreeUniquePtr<uint8_t> padded((uint8_t*) calloc((size_t) expected_width * expected_height * expected_channel, 1));
+            if (fitted == nullptr || padded == nullptr) {
+                LOG_ERROR("error: allocate memory for fit/pad input image");
+                return nullptr;
+            }
+            stbir_resize(image_buffer.get(), width, height, 0,
+                         fitted.get(), fit_w, fit_h, 0, STBIR_TYPE_UINT8,
+                         expected_channel, STBIR_ALPHA_CHANNEL_NONE, 0,
+                         STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
+                         STBIR_FILTER_BOX, STBIR_FILTER_BOX,
+                         STBIR_COLORSPACE_SRGB, nullptr);
+            const int offset_x = (expected_width - fit_w) / 2;
+            const int offset_y = (expected_height - fit_h) / 2;
+            for (int row = 0; row < fit_h; ++row) {
+                memcpy(padded.get() + ((size_t) (offset_y + row) * expected_width + offset_x) * expected_channel,
+                       fitted.get() + (size_t) row * fit_w * expected_channel,
+                       (size_t) fit_w * expected_channel);
+            }
+            LOG_INFO("fit/pad input image from %dx%d to %dx%d inside %dx%d", width, height, fit_w, fit_h, expected_width, expected_height);
+            width = expected_width;
+            height = expected_height;
+            return padded.release();
+        }
         float dst_aspect = (float)expected_width / (float)expected_height;
         float src_aspect = (float)width / (float)height;
 
@@ -782,7 +811,7 @@ uint8_t* load_image_from_file(const char* image_path,
                               int expected_width,
                               int expected_height,
                               int expected_channel) {
-    return load_image_common(false, image_path, 0, width, height, expected_width, expected_height, expected_channel);
+    return load_image_common(false, image_path, 0, width, height, expected_width, expected_height, expected_channel, false);
 }
 
 bool load_sd_image_from_file(sd_image_t* image,
@@ -792,7 +821,7 @@ bool load_sd_image_from_file(sd_image_t* image,
                              int expected_channel) {
     int width;
     int height;
-    image->data = load_image_common(false, image_path, 0, width, height, expected_width, expected_height, expected_channel);
+    image->data = load_image_common(false, image_path, 0, width, height, expected_width, expected_height, expected_channel, false);
     if (image->data == nullptr) {
         return false;
     }
@@ -808,8 +837,9 @@ uint8_t* load_image_from_memory(const char* image_bytes,
                                 int& height,
                                 int expected_width,
                                 int expected_height,
-                                int expected_channel) {
-    return load_image_common(true, image_bytes, len, width, height, expected_width, expected_height, expected_channel);
+                                int expected_channel,
+                                bool fit_with_padding) {
+    return load_image_common(true, image_bytes, len, width, height, expected_width, expected_height, expected_channel, fit_with_padding);
 }
 
 std::vector<uint8_t> create_mjpg_avi_from_sd_images_to_vector(sd_image_t* images, int num_images, int fps, int quality, const sd_audio_t* audio) {
